@@ -27,6 +27,8 @@ namespace IngameScript
         IMyTextSurface _drawingSurfaceProduction;
         RectangleF _viewport;
         RectangleF _viewportProduction;
+        IDictionary<string, int> componentStockDict;
+        IDictionary<string, string> componentMap;
 
         public Program()
         {
@@ -40,8 +42,8 @@ namespace IngameScript
                 _drawingSurface.SurfaceSize
             );
             _viewportProduction = new RectangleF(
-                (_drawingSurface.TextureSize - _drawingSurface.SurfaceSize) / 2f,
-                _drawingSurface.SurfaceSize
+                (_drawingSurfaceProduction.TextureSize - _drawingSurfaceProduction.SurfaceSize) / 2f,
+                _drawingSurfaceProduction.SurfaceSize
             );
 
             PrepareTextSurfaceForSprites(_drawingSurface, _drawingSurfaceProduction);
@@ -52,10 +54,13 @@ namespace IngameScript
             var frame = _drawingSurface.DrawFrame();
             var prodFrame = _drawingSurfaceProduction.DrawFrame();
 
+            componentStockDict = initComponentStock();
+            componentMap = initComponentMap();
+
             DrawSprites(ref frame, ref prodFrame);
 
-            prodFrame.Dispose();
             frame.Dispose();
+            prodFrame.Dispose();
         }
 
         public void DrawSprites(ref MySpriteDrawFrame frame, ref MySpriteDrawFrame prodFrame)
@@ -78,7 +83,7 @@ namespace IngameScript
             sprite = new MySprite()
             {
                 Type = SpriteType.TEXT,
-                Data = AllItems()[0],
+                Data = string.Join("", AllItems()[0].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
                 Position = orePosition,
                 RotationOrScale = 0.8f /* 80 % of the font's default size */,
                 Color = Color.Red,
@@ -93,7 +98,7 @@ namespace IngameScript
             sprite = new MySprite()
             {
                 Type = SpriteType.TEXT,
-                Data = AllItems()[1],
+                Data = string.Join("", AllItems()[1].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
                 Position = ingotPosition,
                 RotationOrScale = 0.8f /* 80 % of the font's default size */,
                 Color = Color.Red,
@@ -108,7 +113,7 @@ namespace IngameScript
             sprite = new MySprite()
             {
                 Type = SpriteType.TEXT,
-                Data = AllItems()[2],
+                Data = string.Join("", AllItems()[2].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
                 Position = componentPosition,
                 RotationOrScale = 0.8f /* 80 % of the font's default size */,
                 Color = Color.Red,
@@ -118,7 +123,7 @@ namespace IngameScript
 
             frame.Add(sprite);
 
-            var statusPosition = new Vector2(800, 20) + _viewport.Position;
+            var statusPosition = new Vector2(850, 20) + _viewport.Position;
 
             sprite = new MySprite()
             {
@@ -134,7 +139,7 @@ namespace IngameScript
             frame.Add(sprite);
         }
 
-        List<string> AllItems()
+        List<IDictionary<string, int>> AllItems()
         {
             IDictionary<string, int> oreDict = new Dictionary<string, int>();
             IDictionary<string, int> ingotDict = new Dictionary<string, int>();
@@ -144,7 +149,7 @@ namespace IngameScript
             ingotDict = initIngotDict(ingotDict);
             componentDict = initComponenttDict(componentDict);
 
-            List<string> returns = new List<string>();
+            List<IDictionary<string, int>> returns = new List<IDictionary<string, int>>();
 
             List<IMyTerminalBlock> cargosList = new List<IMyTerminalBlock>();
             GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(cargosList);
@@ -165,11 +170,17 @@ namespace IngameScript
 
                     if (s.Substring(found + 1, 3) == "Ore")
                     {
-                        oreDict[name] += amount; 
+                        if (oreDict.ContainsKey(name))
+                        {
+                            oreDict[name] += amount;
+                        }
                     }
                     else if (s.Substring(found + 1, 5) == "Ingot")
                     {
-                        ingotDict[name] += amount;
+                        if (ingotDict.ContainsKey(name))
+                        {
+                            ingotDict[name] += amount;
+                        }
                     }
                     else if (s.Substring(found + 1, 9) == "Component")
                     {
@@ -181,9 +192,9 @@ namespace IngameScript
                 }
             }
 
-            returns.Add(string.Join("", oreDict.Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()));
-            returns.Add(string.Join("", ingotDict.Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()));
-            returns.Add(string.Join("", componentDict.Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()));
+            returns.Add(oreDict);
+            returns.Add(ingotDict);
+            returns.Add(componentDict);
 
             return returns;
         }
@@ -222,7 +233,11 @@ namespace IngameScript
         string getAssemblerStatus()
         {
             string assemblers = "Assemblers: ";
+            IDictionary<string, int> myItems = AllItems()[2];
+
             int activeAssemblers = 0;
+            HashSet<string> productionValues = new HashSet<string>();
+            List<MyProductionItem> items = new List<MyProductionItem>();
 
             List<IMyTerminalBlock> assemblerList = new List<IMyTerminalBlock>();
             GridTerminalSystem.GetBlocksOfType<IMyAssembler>(assemblerList);
@@ -237,17 +252,35 @@ namespace IngameScript
                 }
             }
 
+            foreach (var comp in myItems)
+            {
+                if (componentMap.ContainsKey(comp.Key))
+                {
+                    if (componentStockDict.ContainsKey(componentMap[comp.Key]))
+                    {
+                        if (comp.Value < componentStockDict[componentMap[comp.Key]])
+                        {
+                            IMyAssembler compAssembler = GridTerminalSystem.GetBlockWithName(comp.Key) as IMyAssembler;
+                            if (!compAssembler.IsProducing & compAssembler.IsQueueEmpty)
+                            {
+                                compAssembler.AddQueueItem(MyDefinitionId.Parse(componentMap[comp.Key]), Convert.ToDouble(componentStockDict[componentMap[comp.Key]] - comp.Value));
+                            }
+                        }
+                    }
+                }
+            }
+
             return assemblers + activeAssemblers + "/" + assemblerList.Count + "\n";
         }
 
-        public void PrepareTextSurfaceForSprites(IMyTextSurface textSurface, IMyTextSurface textSurfaceProduction)
+        public void PrepareTextSurfaceForSprites(IMyTextSurface textSurface, IMyTextSurface textProductionSurface)
         {
 
             textSurface.ContentType = ContentType.SCRIPT;
             textSurface.Script = "";
 
-            textSurfaceProduction.ContentType = ContentType.SCRIPT;
-            textSurfaceProduction.Script = "";
+            textProductionSurface.ContentType = ContentType.SCRIPT;
+            textProductionSurface.Script = "";
         }
 
         IDictionary<string, int> initOreDict(IDictionary<string, int> oreDict)
@@ -304,6 +337,58 @@ namespace IngameScript
             componentDict.Add("Component/Thrust", 0);
 
             return componentDict;
+        }
+
+        IDictionary<string, int> initComponentStock()
+        {
+            IDictionary<string, int> componentStock = new Dictionary<string, int>();
+            
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/BulletproofGlass", 3000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/ComputerComponent", 5000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/ConstructionComponent", 10000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/DetectorComponent", 3000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/Display", 3000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/GirderComponent", 3000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/InteriorPlate", 10000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/LargeTube", 5000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/MetalGrid", 5000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/MotorComponent", 5000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/PowerCell", 3000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/RadioCommunicationComponent", 1000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/ReactorComponent", 3000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/SmallTube", 5000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/SolarCell", 3000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/SteelPlate", 15000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/Superconductor", 3000);
+            componentStock.Add("MyObjectBuilder_BlueprintDefinition/ThrustComponent", 3000);
+          
+            return componentStock;
+        }
+
+        IDictionary<string, string> initComponentMap()
+        {
+            IDictionary<string, string> componentMap = new Dictionary<string, string>();
+            
+            componentMap.Add("Component/BulletproofGlass", "MyObjectBuilder_BlueprintDefinition/BulletproofGlass");
+            componentMap.Add("Component/Computer", "MyObjectBuilder_BlueprintDefinition/ComputerComponent");
+            componentMap.Add("Component/Construction", "MyObjectBuilder_BlueprintDefinition/ConstructionComponent");
+            componentMap.Add("Component/Detector", "MyObjectBuilder_BlueprintDefinition/DetectorComponent");
+            componentMap.Add("Component/Display", "MyObjectBuilder_BlueprintDefinition/Display");
+            componentMap.Add("Component/Girder", "MyObjectBuilder_BlueprintDefinition/GirderComponent");
+            componentMap.Add("Component/InteriorPlate", "MyObjectBuilder_BlueprintDefinition/InteriorPlate");
+            componentMap.Add("Component/LargeTube", "MyObjectBuilder_BlueprintDefinition/LargeTube");
+            componentMap.Add("Component/MetalGrid", "MyObjectBuilder_BlueprintDefinition/MetalGrid");
+            componentMap.Add("Component/Motor", "MyObjectBuilder_BlueprintDefinition/MotorComponent");
+            componentMap.Add("Component/PowerCell", "MyObjectBuilder_BlueprintDefinition/PowerCell");
+            componentMap.Add("Component/RadioCommunication", "MyObjectBuilder_BlueprintDefinition/RadioCommunicationComponent");
+            componentMap.Add("Component/Reactor", "MyObjectBuilder_BlueprintDefinition/ReactorComponent");
+            componentMap.Add("Component/SmallTube", "MyObjectBuilder_BlueprintDefinition/SmallTube");
+            componentMap.Add("Component/SolarCell", "MyObjectBuilder_BlueprintDefinition/SolarCell");
+            componentMap.Add("Component/SteelPlate", "MyObjectBuilder_BlueprintDefinition/SteelPlate");
+            componentMap.Add("Component/Superconductor", "MyObjectBuilder_BlueprintDefinition/Superconductor");
+            componentMap.Add("Component/Thrust", "MyObjectBuilder_BlueprintDefinition/ThrustComponent");
+
+            return componentMap;
         }
 
     }
