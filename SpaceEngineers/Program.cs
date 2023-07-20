@@ -65,6 +65,8 @@ namespace IngameScript
 
         public void DrawSprites(ref MySpriteDrawFrame frame, ref MySpriteDrawFrame prodFrame)
         {
+            List<IDictionary<string, int>> myItems = new List<IDictionary<string, int>>();
+            myItems = AllItems();
             var sprite = new MySprite()
             {
                 Type = SpriteType.TEXTURE,
@@ -83,7 +85,7 @@ namespace IngameScript
             sprite = new MySprite()
             {
                 Type = SpriteType.TEXT,
-                Data = string.Join("", AllItems()[0].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
+                Data = string.Join("", myItems[0].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
                 Position = orePosition,
                 RotationOrScale = 0.8f /* 80 % of the font's default size */,
                 Color = Color.Red,
@@ -98,7 +100,7 @@ namespace IngameScript
             sprite = new MySprite()
             {
                 Type = SpriteType.TEXT,
-                Data = string.Join("", AllItems()[1].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
+                Data = string.Join("", myItems[1].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
                 Position = ingotPosition,
                 RotationOrScale = 0.8f /* 80 % of the font's default size */,
                 Color = Color.Red,
@@ -113,7 +115,7 @@ namespace IngameScript
             sprite = new MySprite()
             {
                 Type = SpriteType.TEXT,
-                Data = string.Join("", AllItems()[2].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
+                Data = string.Join("", myItems[2].Select(pair => string.Format("{0}: {1}\n", pair.Key.ToString(), pair.Value.ToString())).ToArray()),
                 Position = componentPosition,
                 RotationOrScale = 0.8f /* 80 % of the font's default size */,
                 Color = Color.Red,
@@ -242,10 +244,30 @@ namespace IngameScript
             List<IMyTerminalBlock> assemblerList = new List<IMyTerminalBlock>();
             GridTerminalSystem.GetBlocksOfType<IMyAssembler>(assemblerList);
 
+            IDictionary<string, int> assemblerDict = new Dictionary<string, int>();
+
             for (int i = 0; i < assemblerList.Count; i++)
             {
 
                 IMyAssembler assembler = assemblerList[i] as IMyAssembler;
+
+                int length = assembler.DisplayNameText.IndexOf(" ");
+                string assemblerName = "";
+
+                if (length > 0)
+                {
+                    assemblerName = assembler.DisplayNameText.Substring(0, length);
+                }
+
+                if (assemblerDict.ContainsKey(assemblerName))
+                {
+                    assemblerDict[assemblerName] += 1;
+                } else
+                {
+                    assemblerDict[assemblerName] = 0;
+                    assemblerDict[assemblerName] += 1;
+                }
+
                 if (assembler.IsProducing)
                 {
                     activeAssemblers++;
@@ -256,14 +278,20 @@ namespace IngameScript
             {
                 if (componentMap.ContainsKey(comp.Key))
                 {
-                    if (componentStockDict.ContainsKey(componentMap[comp.Key]))
+                    if (componentStockDict.ContainsKey(componentMap[comp.Key]) & assemblerDict.ContainsKey(comp.Key))
                     {
                         if (comp.Value < componentStockDict[componentMap[comp.Key]])
                         {
-                            IMyAssembler compAssembler = GridTerminalSystem.GetBlockWithName(comp.Key) as IMyAssembler;
-                            if (!compAssembler.IsProducing & compAssembler.IsQueueEmpty)
+                            int queueAmount = (componentStockDict[componentMap[comp.Key]] - comp.Value) / assemblerDict[comp.Key];
+
+                            for (int y = 0; y < assemblerDict[comp.Key]; y++)
                             {
-                                compAssembler.AddQueueItem(MyDefinitionId.Parse(componentMap[comp.Key]), Convert.ToDouble(componentStockDict[componentMap[comp.Key]] - comp.Value));
+                                IMyAssembler compAssembler = GridTerminalSystem.GetBlockWithName(comp.Key + " " + y.ToString()) as IMyAssembler;
+
+                                if (!compAssembler.IsProducing & compAssembler.IsQueueEmpty)
+                                {
+                                    compAssembler.AddQueueItem(MyDefinitionId.Parse(componentMap[comp.Key]), decimal.Parse(queueAmount.ToString()));
+                                }
                             }
                         }
                     }
